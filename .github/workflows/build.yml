@@ -1,4 +1,4 @@
-name: Build OpenEXR
+name: Build Libraries
 
 on:
   push:
@@ -10,68 +10,36 @@ permissions:
   contents: write
 
 jobs:
-  build-openexr-windows:
+  prepare-sources:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository with submodules
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Upload submodule sources
+      uses: actions/upload-artifact@v4
+      with:
+        name: submodule-sources
+        path: |
+          libs/**
+        retention-days: 1
+
+  build-libraries-windows:
+    needs: prepare-sources
     runs-on: windows-latest
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    - name: Download submodule sources
+      uses: actions/download-artifact@v4
       with:
-        submodules: recursive
-
-    - name: Setup MSVC
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: amd64
-
-    - name: Build all
-      shell: bash
-      run: |
-        ./build_all.sh --windows
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: openexr-windows
-        path: |
-          install/**
-        retention-days: 7
-
-  build-openexr-windows-arm64:
-    runs-on: windows-11-arm
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
-
-    - name: Setup MSVC
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: arm64
-
-    - name: Build all
-      shell: bash
-      run: |
-        ./build_all.sh --windows-arm
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: openexr-windows-arm64
-        path: |
-          install/**
-        retention-days: 7
-
-  build-openexr-linux:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+        name: submodule-sources
+        path: .
 
     - name: Install Clang/LLVM
       uses: KyleMayes/install-llvm-action@v2
@@ -79,36 +47,80 @@ jobs:
         version: "21.1.8"
         env: true
 
-    - name: Setup build environment
+    - name: Build all
+      shell: bash
+      env:
+        CC: clang-cl
+        CXX: clang-cl
       run: |
-        # Enable multi-architecture support
-        sudo dpkg --add-architecture arm64
-        sudo dpkg --add-architecture riscv64
-        sudo dpkg --add-architecture i386
-        sudo dpkg --add-architecture armhf
-        sudo apt-get update || true
+        ./build_all.sh -w
 
-        sudo apt-get install -y ninja-build
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: libraries-windows
+        path: |
+          install/**
+        retention-days: 7
 
-        # aarch64 cross-compilation libraries
-        sudo apt-get install -y \
-          gcc-aarch64-linux-gnu \
-          g++-aarch64-linux-gnu
-        
-        # riscv64 cross-compilation libraries
-        sudo apt-get install -y \
-          gcc-riscv64-linux-gnu \
-          g++-riscv64-linux-gnu
+  build-libraries-windows-arm64:
+    needs: prepare-sources
+    runs-on: windows-11-arm
 
-        # i686 cross-compilation libraries
-        sudo apt-get install -y \
-          gcc-i686-linux-gnu \
-          g++-i686-linux-gnu
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-        # arm-linux-gnueabihf cross-compilation libraries
-        sudo apt-get install -y \
-          gcc-arm-linux-gnueabihf \
-          g++-arm-linux-gnueabihf
+    - name: Download submodule sources
+      uses: actions/download-artifact@v4
+      with:
+        name: submodule-sources
+        path: .
+
+    - name: Install Clang/LLVM
+      uses: KyleMayes/install-llvm-action@v2
+      with:
+        version: "21.1.8"
+        env: true
+
+    - name: Build all
+      shell: bash
+      env:
+        CC: clang-cl
+        CXX: clang-cl
+      run: |
+        ./build_all.sh -wa
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: libraries-windows-arm64
+        path: |
+          install/**
+        retention-days: 7
+
+  build-libraries-linux:
+    needs: prepare-sources
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download submodule sources
+      uses: actions/download-artifact@v4
+      with:
+        name: submodule-sources
+        path: .
+
+    - name: Setup cross-compilation environment
+      uses: SpaceTravelCompany/My-Actions/setup-linux-cross@main
+
+    - name: Install Clang/LLVM
+      uses: KyleMayes/install-llvm-action@v2
+      with:
+        version: "21.1.8"
+        env: true 
 
     - name: Build all 
       shell: bash
@@ -118,19 +130,24 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: openexr-linux
+        name: libraries-compiled-linux
         path: |
           install/**
         retention-days: 7
 
-  build-openexr-android:
+  build-libraries-android:
+    needs: prepare-sources
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    - name: Download submodule sources
+      uses: actions/download-artifact@v4
       with:
-        submodules: recursive
+        name: submodule-sources
+        path: .
 
     - uses: nttld/setup-ndk@v1
       id: setup-ndk
@@ -148,21 +165,19 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: openexr-android
+        name: libraries-compiled-android
         path: |
           install/**
         retention-days: 7
 
   create-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-openexr-linux, build-openexr-android, build-openexr-windows, build-openexr-windows-arm64]
+    needs: [build-libraries-linux, build-libraries-android, build-libraries-windows, build-libraries-windows-arm64]
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
 
     - name: Download all artifacts
       uses: actions/download-artifact@v4
@@ -173,13 +188,13 @@ jobs:
       run: |
         VERSION=${GITHUB_REF#refs/tags/v}
         mkdir -p release
-        cp -r artifacts/openexr-linux release/linux
-        cp -r artifacts/openexr-android release/android
-        cp -r artifacts/openexr-windows release/windows
-        cp -r artifacts/openexr-windows-arm64 release/windows-arm64
+        cp -r artifacts/libraries-compiled-linux release/linux
+        cp -r artifacts/libraries-compiled-android release/android
+        cp -r artifacts/libraries-windows release/windows
+        cp -r artifacts/libraries-windows-arm64 release/windows-arm64
         cd release
-        tar -czf ../openexr-${VERSION}.tar.gz .
-        zip -r ../openexr-${VERSION}.zip .
+        tar -czf ../libraries-${VERSION}.tar.gz .
+        zip -r ../libraries-${VERSION}.zip .
         cd ..
         
         echo "VERSION=${VERSION}" >> $GITHUB_ENV
@@ -188,11 +203,10 @@ jobs:
       uses: softprops/action-gh-release@v2.5.0
       with:
         files: |
-          openexr-*.tar.gz
-          openexr-*.zip
+          libraries-*.tar.gz
+          libraries-*.zip
         generate_release_notes: true
         draft: false
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
