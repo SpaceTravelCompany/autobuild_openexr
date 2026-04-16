@@ -38,7 +38,7 @@ build_target() {
 
     cmake "${cmake_args[@]}"
     cmake --build "${build_dir}" --config Release --parallel "$(get_build_jobs)"
-    cmake --install "${build_dir}" --config Release
+    cmake --install "${build_dir}" --config Release --prefix "${install_dir}"
 
     echo "libdeflate build complete (${target}): ${install_dir}"
     echo ""

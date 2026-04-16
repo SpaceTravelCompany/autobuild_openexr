@@ -86,6 +86,28 @@ require_android_ndk() {
     fi
 }
 
+require_windows_llvm() {
+    if ! command -v clang-cl >/dev/null 2>&1; then
+        echo "error: clang-cl was not found in PATH" >&2
+        exit 1
+    fi
+
+    if ! command -v lld-link >/dev/null 2>&1; then
+        echo "error: lld-link was not found in PATH" >&2
+        exit 1
+    fi
+
+    if ! command -v llvm-lib >/dev/null 2>&1; then
+        echo "error: llvm-lib was not found in PATH" >&2
+        exit 1
+    fi
+}
+
+windows_tool_path() {
+    local tool_name="$1"
+    command -v "${tool_name}"
+}
+
 require_file() {
     local path="$1"
     local message="$2"
@@ -120,6 +142,20 @@ append_common_cmake_args() {
             args_ref+=(-DCMAKE_CXX_COMPILER="$(android_cxx "${target}")")
         fi
     elif [[ "${WINDOWS_ONLY}" == true || "${WINDOWS_ARM_ONLY}" == true ]]; then
+        local lld_link_path
+        local llvm_lib_path
+        require_windows_llvm
+        args_ref+=(-DCMAKE_C_COMPILER=clang-cl)
+        if [[ "${language}" == "cxx" ]]; then
+            args_ref+=(-DCMAKE_CXX_COMPILER=clang-cl)
+        fi
+        lld_link_path="$(windows_tool_path lld-link)"
+        llvm_lib_path="$(windows_tool_path llvm-lib)"
+        args_ref+=(-DCMAKE_LINKER="${lld_link_path}")
+        args_ref+=(-DCMAKE_AR="${llvm_lib_path}")
+        if command -v llvm-rc >/dev/null 2>&1; then
+            args_ref+=(-DCMAKE_RC_COMPILER="$(windows_tool_path llvm-rc)")
+        fi
         args_ref+=(-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded)
     else
         args_ref+=(-DCMAKE_C_COMPILER=clang)

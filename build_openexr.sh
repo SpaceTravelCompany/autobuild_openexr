@@ -6,83 +6,8 @@ source "${SCRIPT_DIR}/common_vars.sh"
 parse_build_args "$@"
 
 OPENEXR_SOURCE_DIR="${SCRIPT_DIR}/libs/openexr"
-OPENEXR_PATCH_BACKUP_DIR=""
-OPENEXR_PATCH_ACTIVE=0
 
 ensure_submodule_initialized "libs/openexr"
-
-cleanup_openexr_patch() {
-    if [[ "${OPENEXR_PATCH_ACTIVE}" != "1" ]] || [[ -z "${OPENEXR_PATCH_BACKUP_DIR}" ]]; then
-        return
-    fi
-
-    cp "${OPENEXR_PATCH_BACKUP_DIR}/ImfHeader.cpp" \
-       "${OPENEXR_SOURCE_DIR}/src/lib/OpenEXR/ImfHeader.cpp"
-    cp "${OPENEXR_PATCH_BACKUP_DIR}/CMakeLists.txt" \
-       "${OPENEXR_SOURCE_DIR}/src/lib/OpenEXR/CMakeLists.txt"
-    rm -rf "${OPENEXR_PATCH_BACKUP_DIR}"
-}
-
-trap cleanup_openexr_patch EXIT
-
-ensure_openexr_patch_applied() {
-    local header_file="${OPENEXR_SOURCE_DIR}/src/lib/OpenEXR/ImfHeader.cpp"
-    local cmake_file="${OPENEXR_SOURCE_DIR}/src/lib/OpenEXR/CMakeLists.txt"
-    local needs_patch=0
-
-    if ! grep -q 'OPENEXR_ENABLE_RUNTIME_ZIP_SSE41' "${cmake_file}"; then
-        needs_patch=1
-    fi
-
-    if ! grep -q '#include "ImfZip.h"' "${header_file}"; then
-        needs_patch=1
-    fi
-
-    if ! grep -q 'Zip::initializeFuncs ();' "${header_file}"; then
-        needs_patch=1
-    fi
-
-    if [[ "${needs_patch}" != "1" ]]; then
-        return
-    fi
-
-    OPENEXR_PATCH_BACKUP_DIR="$(mktemp -d)"
-    cp "${header_file}" "${OPENEXR_PATCH_BACKUP_DIR}/ImfHeader.cpp"
-    cp "${cmake_file}" "${OPENEXR_PATCH_BACKUP_DIR}/CMakeLists.txt"
-    OPENEXR_PATCH_ACTIVE=1
-
-    if ! grep -q 'OPENEXR_ENABLE_RUNTIME_ZIP_SSE41' "${cmake_file}"; then
-        cat <<'EOF' >> "${cmake_file}"
-
-if(OPENEXR_ENABLE_RUNTIME_ZIP_SSE41)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    set_property(SOURCE ImfZip.cpp APPEND PROPERTY COMPILE_OPTIONS
-      "$<$<CXX_COMPILER_ID:Clang>:-msse4.1>"
-      "$<$<CXX_COMPILER_ID:Clang>:-fno-vectorize>"
-      "$<$<CXX_COMPILER_ID:Clang>:-fno-slp-vectorize>"
-      "$<$<CXX_COMPILER_ID:GNU>:-msse4.1>"
-      "$<$<CXX_COMPILER_ID:GNU>:-fno-tree-vectorize>")
-    message(STATUS "Enabling runtime ZIP SIMD for ImfZip.cpp")
-  endif()
-endif()
-EOF
-    fi
-
-    if ! grep -q '#include "ImfZip.h"' "${header_file}"; then
-        perl -0pi -e 's/#include "ImfNamespace.h"/#include "ImfZip.h"\n#include "ImfNamespace.h"/' "${header_file}"
-    fi
-
-    if ! grep -q 'Zip::initializeFuncs ();' "${header_file}"; then
-        perl -0pi -e 's!(\s+// Register functions, for example specialized functions\r?\n\s+// for different CPU architectures\.\r?\n\s+//\r?\n)!$1        Zip::initializeFuncs ();\n!' "${header_file}"
-    fi
-
-    if ! grep -q 'OPENEXR_ENABLE_RUNTIME_ZIP_SSE41' "${cmake_file}" || \
-       ! grep -q '#include "ImfZip.h"' "${header_file}" || \
-       ! grep -q 'Zip::initializeFuncs ();' "${header_file}"; then
-        echo "error: unable to apply the local OpenEXR runtime SIMD patch" >&2
-        exit 1
-    fi
-}
 
 build_target() {
     local target="$1"
@@ -91,10 +16,13 @@ build_target() {
     local install_dir="${SCRIPT_DIR}/install/openexr/${target}"
     local imath_prefix="${SCRIPT_DIR}/install/Imath/${target}"
     local deflate_prefix="${SCRIPT_DIR}/install/libdeflate/${target}"
+    local openjph_prefix="${SCRIPT_DIR}/install/openjph/${target}"
     local imath_config="${imath_prefix}/lib/cmake/Imath/ImathConfig.cmake"
     local deflate_config="${deflate_prefix}/lib/cmake/libdeflate/libdeflate-config.cmake"
+    local openjph_config="${openjph_prefix}/lib/cmake/openjph/openjph-config.cmake"
     local configure_log="${build_dir}/configure.log"
     local runtime_zip_sse41="OFF"
+    local -a arch_feature_args=()
 
     if target_requires_runtime_zip_sse41 "${target}"; then
         runtime_zip_sse41="ON"
@@ -102,6 +30,12 @@ build_target() {
 
     require_file "${imath_config}" "missing Imath install for ${target}; run build_Imath.sh first"
     require_file "${deflate_config}" "missing libdeflate install for ${target}; run build_libdeflate.sh first"
+    require_file "${openjph_config}" "missing openjph install for ${target}; run build_openjph.sh first"
+
+    if [[ "${target}" == "native-windows" ]]; then
+        arch_feature_args+=(-DCMAKE_C_FLAGS=/clang:-mssse3\ /clang:-msse4.1)
+        arch_feature_args+=(-DCMAKE_CXX_FLAGS=/clang:-mssse3\ /clang:-msse4.1)
+    fi
 
     echo "----------------------------------------"
     echo "Building OpenEXR for ${target}"
@@ -119,6 +53,8 @@ build_target() {
         -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
         -DBUILD_SHARED_LIBS=OFF
         -DBUILD_TESTING=OFF
+        -DBUILD_WEBSITE=OFF
+        -DOPENEXR_IS_SUBPROJECT=ON
         -DOPENEXR_BUILD_TOOLS=OFF
         -DOPENEXR_BUILD_EXAMPLES=OFF
         -DOPENEXR_BUILD_PYTHON=OFF
@@ -126,17 +62,20 @@ build_target() {
         -DOPENEXR_TEST_LIBRARIES=OFF
         -DOPENEXR_TEST_TOOLS=OFF
         -DOPENEXR_TEST_PYTHON=OFF
+        -DOPENEXR_EXTRA_MATH_LIB=
         -DOPENEXR_FORCE_INTERNAL_DEFLATE=OFF
         -DOPENEXR_FORCE_INTERNAL_IMATH=OFF
-        -DOPENEXR_FORCE_INTERNAL_OPENJPH=ON
+        -DOPENEXR_FORCE_INTERNAL_OPENJPH=OFF
         -DOPENEXR_ENABLE_THREADING=OFF
         -DOPENEXR_ENABLE_RUNTIME_ZIP_SSE41="${runtime_zip_sse41}"
-        -DCMAKE_PREFIX_PATH="${imath_prefix};${deflate_prefix}"
+        -DCMAKE_PREFIX_PATH="${imath_prefix};${deflate_prefix};${openjph_prefix}"
         -DImath_DIR="${imath_prefix}/lib/cmake/Imath"
         -Dlibdeflate_DIR="${deflate_prefix}/lib/cmake/libdeflate"
+        -Dopenjph_DIR="${openjph_prefix}/lib/cmake/openjph"
     )
 
     append_common_cmake_args "${target}" "${android_arch}" "cxx" cmake_args
+    cmake_args+=("${arch_feature_args[@]}")
 
     cmake "${cmake_args[@]}" 2>&1 | tee "${configure_log}"
 
@@ -157,5 +96,4 @@ build_target() {
     echo ""
 }
 
-ensure_openexr_patch_applied
 run_selected_targets build_target
