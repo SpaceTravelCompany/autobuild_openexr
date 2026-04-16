@@ -1,0 +1,198 @@
+name: Build OpenEXR
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-openexr-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64
+
+    - name: Build all
+      shell: bash
+      run: |
+        ./build_all.sh --windows
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: openexr-windows
+        path: |
+          install/**
+        retention-days: 7
+
+  build-openexr-windows-arm64:
+    runs-on: windows-11-arm
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: arm64
+
+    - name: Build all
+      shell: bash
+      run: |
+        ./build_all.sh --windows-arm
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: openexr-windows-arm64
+        path: |
+          install/**
+        retention-days: 7
+
+  build-openexr-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install Clang/LLVM
+      uses: KyleMayes/install-llvm-action@v2
+      with:
+        version: "21.1.8"
+        env: true
+
+    - name: Setup build environment
+      run: |
+        # Enable multi-architecture support
+        sudo dpkg --add-architecture arm64
+        sudo dpkg --add-architecture riscv64
+        sudo dpkg --add-architecture i386
+        sudo dpkg --add-architecture armhf
+        sudo apt-get update || true
+
+        sudo apt-get install -y ninja-build
+
+        # aarch64 cross-compilation libraries
+        sudo apt-get install -y \
+          gcc-aarch64-linux-gnu \
+          g++-aarch64-linux-gnu
+        
+        # riscv64 cross-compilation libraries
+        sudo apt-get install -y \
+          gcc-riscv64-linux-gnu \
+          g++-riscv64-linux-gnu
+
+        # i686 cross-compilation libraries
+        sudo apt-get install -y \
+          gcc-i686-linux-gnu \
+          g++-i686-linux-gnu
+
+        # arm-linux-gnueabihf cross-compilation libraries
+        sudo apt-get install -y \
+          gcc-arm-linux-gnueabihf \
+          g++-arm-linux-gnueabihf
+
+    - name: Build all 
+      shell: bash
+      run: |
+        ./build_all.sh
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: openexr-linux
+        path: |
+          install/**
+        retention-days: 7
+
+  build-openexr-android:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: r29
+        add-to-path: false
+        
+    - name: Build all
+      env: 
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      shell: bash
+      run: |
+        ./build_all.sh --android
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: openexr-android
+        path: |
+          install/**
+        retention-days: 7
+
+  create-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-openexr-linux, build-openexr-android, build-openexr-windows, build-openexr-windows-arm64]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Release Archive
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        mkdir -p release
+        cp -r artifacts/openexr-linux release/linux
+        cp -r artifacts/openexr-android release/android
+        cp -r artifacts/openexr-windows release/windows
+        cp -r artifacts/openexr-windows-arm64 release/windows-arm64
+        cd release
+        tar -czf ../openexr-${VERSION}.tar.gz .
+        zip -r ../openexr-${VERSION}.zip .
+        cd ..
+        
+        echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2.5.0
+      with:
+        files: |
+          openexr-*.tar.gz
+          openexr-*.zip
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

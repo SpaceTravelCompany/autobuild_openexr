@@ -1,0 +1,9 @@
+[submodule "libs/openexr"]
+	path = libs/openexr
+	url = https://github.com/AcademySoftwareFoundation/openexr.git
+[submodule "libs/Imath"]
+	path = libs/Imath
+	url = https://github.com/AcademySoftwareFoundation/Imath.git
+[submodule "libs/libdeflate"]
+	path = libs/libdeflate
+	url = https://github.com/ebiggers/libdeflate.git
