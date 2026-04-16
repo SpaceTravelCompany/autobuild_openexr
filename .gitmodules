@@ -7,3 +7,6 @@
 [submodule "libs/libdeflate"]
 	path = libs/libdeflate
 	url = https://github.com/ebiggers/libdeflate.git
+[submodule "libs/openjph"]
+	path = libs/openjph
+	url = https://github.com/aous72/OpenJPH.git
