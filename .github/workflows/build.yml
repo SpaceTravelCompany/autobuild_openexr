@@ -1,212 +1,178 @@
-name: Build Libraries
+name: Build OpenEXR
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  prepare-sources:
+  build-openexr-linux:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository with submodules
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - name: Upload submodule sources
-      uses: actions/upload-artifact@v4
-      with:
-        name: submodule-sources
-        path: |
-          libs/**
-        retention-days: 1
+      - name: Setup cross-compilation environment
+        uses: SpaceTravelCompany/My-Actions/setup-linux-cross@main
 
-  build-libraries-windows:
-    needs: prepare-sources
+      - name: Install Clang/LLVM
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "21.1.8"
+          env: true
+
+      - name: Build OpenEXR dependencies
+        shell: bash
+        run: ./build_all.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openexr-linux
+          path: install/**
+          retention-days: 7
+
+  build-openexr-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r29
+          add-to-path: false
+
+      - name: Build OpenEXR dependencies
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: ./build_all.sh --android
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openexr-android
+          path: install/**
+          retention-days: 7
+
+  build-openexr-windows:
     runs-on: windows-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - name: Download submodule sources
-      uses: actions/download-artifact@v4
-      with:
-        name: submodule-sources
-        path: .
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
 
-    - name: Install Clang/LLVM
-      uses: KyleMayes/install-llvm-action@v2
-      with:
-        version: "21.1.8"
-        env: true
+      - name: Install Clang/LLVM
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "21.1.8"
+          env: true
 
-    - name: Build all
-      shell: bash
-      env:
-        CC: clang-cl
-        CXX: clang-cl
-      run: |
-        ./build_all.sh -w
+      - name: Build OpenEXR dependencies
+        shell: bash
+        env:
+          CC: clang-cl
+          CXX: clang-cl
+        run: ./build_all.sh --windows
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: libraries-windows
-        path: |
-          install/**
-        retention-days: 7
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openexr-windows
+          path: install/**
+          retention-days: 7
 
-  build-libraries-windows-arm64:
-    needs: prepare-sources
+  build-openexr-windows-arm64:
     runs-on: windows-11-arm
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - name: Download submodule sources
-      uses: actions/download-artifact@v4
-      with:
-        name: submodule-sources
-        path: .
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: arm64
 
-    - name: Install Clang/LLVM
-      uses: KyleMayes/install-llvm-action@v2
-      with:
-        version: "21.1.8"
-        env: true
+      - name: Install Clang/LLVM
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "21.1.8"
+          env: true
 
-    - name: Build all
-      shell: bash
-      env:
-        CC: clang-cl
-        CXX: clang-cl
-      run: |
-        ./build_all.sh -wa
+      - name: Build OpenEXR dependencies
+        shell: bash
+        env:
+          CC: clang-cl
+          CXX: clang-cl
+        run: ./build_all.sh --windows-arm
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: libraries-windows-arm64
-        path: |
-          install/**
-        retention-days: 7
-
-  build-libraries-linux:
-    needs: prepare-sources
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Download submodule sources
-      uses: actions/download-artifact@v4
-      with:
-        name: submodule-sources
-        path: .
-
-    - name: Setup cross-compilation environment
-      uses: SpaceTravelCompany/My-Actions/setup-linux-cross@main
-
-    - name: Install Clang/LLVM
-      uses: KyleMayes/install-llvm-action@v2
-      with:
-        version: "21.1.8"
-        env: true 
-
-    - name: Build all 
-      shell: bash
-      run: |
-        ./build_all.sh
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: libraries-compiled-linux
-        path: |
-          install/**
-        retention-days: 7
-
-  build-libraries-android:
-    needs: prepare-sources
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Download submodule sources
-      uses: actions/download-artifact@v4
-      with:
-        name: submodule-sources
-        path: .
-
-    - uses: nttld/setup-ndk@v1
-      id: setup-ndk
-      with:
-        ndk-version: r29
-        add-to-path: false
-        
-    - name: Build all
-      env: 
-        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-      shell: bash
-      run: |
-        ./build_all.sh --android
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: libraries-compiled-android
-        path: |
-          install/**
-        retention-days: 7
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openexr-windows-arm64
+          path: install/**
+          retention-days: 7
 
   create-release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-libraries-linux, build-libraries-android, build-libraries-windows, build-libraries-windows-arm64]
+    needs:
+      - build-openexr-linux
+      - build-openexr-android
+      - build-openexr-windows
+      - build-openexr-windows-arm64
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
+      - name: Create release archive
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          mkdir -p release
+          cp -r artifacts/openexr-linux release/linux
+          cp -r artifacts/openexr-android release/android
+          cp -r artifacts/openexr-windows release/windows
+          cp -r artifacts/openexr-windows-arm64 release/windows-arm64
+          (
+            cd release
+            tar -czf "../openexr-${VERSION}.tar.gz" .
+            zip -r "../openexr-${VERSION}.zip" .
+          )
+          echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
 
-    - name: Create Release Archive
-      run: |
-        VERSION=${GITHUB_REF#refs/tags/v}
-        mkdir -p release
-        cp -r artifacts/libraries-compiled-linux release/linux
-        cp -r artifacts/libraries-compiled-android release/android
-        cp -r artifacts/libraries-windows release/windows
-        cp -r artifacts/libraries-windows-arm64 release/windows-arm64
-        cd release
-        tar -czf ../libraries-${VERSION}.tar.gz .
-        zip -r ../libraries-${VERSION}.zip .
-        cd ..
-        
-        echo "VERSION=${VERSION}" >> $GITHUB_ENV
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v2.5.0
-      with:
-        files: |
-          libraries-*.tar.gz
-          libraries-*.zip
-        generate_release_notes: true
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create release
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          files: |
+            openexr-*.tar.gz
+            openexr-*.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
